@@ -8,7 +8,7 @@
 
 import { buildSeed } from "./seed.js";
 
-const STORAGE_KEY = "bakkabnb.v1";
+const STORAGE_KEY = "bakkabnb.v2";
 const USE_BACKEND = false; // flip to true once a backend implements the same interface
 
 // ---------------------------------------------------------------------------
@@ -83,9 +83,11 @@ const LocalStore = {
     return read().bookings;
   },
 
-  async addBooking({ bedId, personId, startDate, endDate }) {
+  // Bookings carry a free-text occupant name (not tied to the account), so a
+  // family member can book a bed for a guest or relative.
+  async addBooking({ bedId, name, startDate, endDate }) {
     const db = read();
-    const booking = { id: uid("bk"), bedId, personId, startDate, endDate };
+    const booking = { id: uid("bk"), bedId, name: name.trim(), startDate, endDate };
     db.bookings.push(booking);
     write(db);
     return booking;
@@ -113,6 +115,17 @@ const LocalStore = {
       comments: [],
     };
     db.events.push(event);
+    write(db);
+    return event;
+  },
+
+  async updateEvent(id, { title, description, date }) {
+    const db = read();
+    const event = db.events.find((e) => e.id === id);
+    if (!event) throw new Error("Event not found.");
+    event.title = title;
+    event.description = description;
+    event.date = date;
     write(db);
     return event;
   },
@@ -168,6 +181,25 @@ const LocalStore = {
     const meal = db.meals.find((m) => m.id === mealId);
     if (!meal) throw new Error("Meal not found.");
     meal.items.push({ id: uid("it"), food, broughtBy });
+    write(db);
+    return meal;
+  },
+
+  async updateMealItem(mealId, itemId, { food }) {
+    const db = read();
+    const meal = db.meals.find((m) => m.id === mealId);
+    const item = meal && meal.items.find((it) => it.id === itemId);
+    if (!item) throw new Error("Item not found.");
+    item.food = food;
+    write(db);
+    return meal;
+  },
+
+  async removeMealItem(mealId, itemId) {
+    const db = read();
+    const meal = db.meals.find((m) => m.id === mealId);
+    if (!meal) throw new Error("Meal not found.");
+    meal.items = meal.items.filter((it) => it.id !== itemId);
     write(db);
     return meal;
   },

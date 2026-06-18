@@ -5,6 +5,7 @@
 import { store } from "./store.js";
 import { currentUser, isLoggedIn, login, register, logout } from "./auth.js";
 import { DEFAULT_PASSWORD } from "./seed.js";
+import { calendarHTML } from "./calendar.js";
 
 const app = document.getElementById("app");
 const topbar = document.getElementById("topbar");
@@ -34,8 +35,19 @@ function fmtDate(iso) {
   return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
 }
 
+function fmtShort(iso) {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
 function isActiveOn(booking, dateStr) {
   return booking.startDate <= dateStr && dateStr <= booking.endDate;
+}
+
+function emojiForName(name, people) {
+  const p = people.find((x) => x.name.toLowerCase() === String(name).trim().toLowerCase());
+  return p ? p.emoji : "🛌";
 }
 
 function go(path) {
@@ -129,13 +141,11 @@ async function renderHome() {
     store.getBuildings(), store.getBookings(), store.getPeople(),
   ]);
   const today = todayStr();
-  const personById = Object.fromEntries(people.map((p) => [p.id, p]));
   const occupantsOf = (building) => {
     const bedIds = new Set(building.beds.map((b) => b.id));
     return bookings
       .filter((bk) => bedIds.has(bk.bedId) && isActiveOn(bk, today))
-      .map((bk) => personById[bk.personId])
-      .filter(Boolean);
+      .map((bk) => bk.name);
   };
 
   app.innerHTML = `
@@ -150,7 +160,7 @@ async function renderHome() {
           <h3>${b.emoji} ${esc(b.name)} <span class="count">· ${sleepable} beds</span></h3>
           <div class="bubbles">
             ${occ.length
-              ? occ.map((p) => `<span class="bubble"><span class="av">${p.emoji}</span>${esc(p.name)}</span>`).join("")
+              ? occ.map((n) => `<span class="bubble"><span class="av">${emojiForName(n, people)}</span>${esc(n)}</span>`).join("")
               : `<span class="empty-note">Empty right now</span>`}
           </div>
         </div>`;
@@ -165,44 +175,83 @@ async function renderBeds() {
     store.getBuildings(), store.getBookings(), store.getPeople(),
   ]);
   const today = todayStr();
-  const personById = Object.fromEntries(people.map((p) => [p.id, p]));
   const me = currentUser();
-  const meId = people.find((p) => p.name.toLowerCase() === me.toLowerCase())?.id;
+
+  // Calendar: per-building occupied-bed count per day, using building emoji.
+  const bedToBuilding = {};
+  buildings.forEach((b) => b.beds.forEach((bed) => { bedToBuilding[bed.id] = b; }));
+  const bedsMark = (dateStr) => {
+    const counts = {};
+    bookings.forEach((bk) => {
+      if (!isActiveOn(bk, dateStr)) return;
+      const b = bedToBuilding[bk.bedId];
+      if (b) counts[b.id] = (counts[b.id] || 0) + 1;
+    });
+    return buildings
+      .filter((b) => counts[b.id])
+      .map((b) => `<span class="cal-mark" title="${esc(b.name)}: ${counts[b.id]} occupied">${b.emoji}${counts[b.id]}</span>`)
+      .join("");
+  };
 
   app.innerHTML = `
     <h1>🛏️ Beds</h1>
-    <p class="subtitle">Who's sleeping where. Showing occupancy for today, ${fmtDate(today)}.</p>
+    <p class="subtitle">Book future stays and see who's where. Next two months:</p>
+    ${calendarHTML(new Date(), 2, bedsMark)}
     ${buildings.map((b) => `
       <h2>${b.emoji} ${esc(b.name)}</h2>
       <div class="card">
         ${b.beds.map((bed) => {
-          const active = bookings.find((bk) => bk.bedId === bed.id && isActiveOn(bk, today));
           const ooc = bed.status === "out_of_commission";
-          const occupant = active ? personById[active.personId] : null;
+          const upcoming = bookings
+            .filter((bk) => bk.bedId === bed.id && bk.endDate >= today)
+            .sort((a, b2) => (a.startDate < b2.startDate ? -1 : 1));
           return `
           <div class="bed-row">
             <span class="bed-icon">${bed.type === "double" ? "🛏️" : "🛌"}</span>
             <span class="bed-label">${esc(bed.label)}</span>
             <span class="bed-meta">${bed.type}</span>
             ${ooc ? `<span class="tag ooc">out of commission</span>` : ""}
-            ${occupant ? `<span class="tag occupied">${occupant.emoji} ${esc(occupant.name)}</span>` : ""}
             <span class="spacer"></span>
-            ${ooc ? "" : active
-              ? (active.personId === meId
-                  ? `<button class="btn small danger" data-free="${active.id}">Free bed</button>`
-                  : "")
-              : `<button class="btn small" data-book="${bed.id}">Book for me</button>`}
-          </div>`;
+            ${ooc ? "" : `<button class="btn small" data-bookbtn="${bed.id}">Book</button>`}
+          </div>
+          ${!ooc && upcoming.length ? `
+          <div class="bed-bookings">
+            ${upcoming.map((bk) => `
+              <span class="chip booking ${isActiveOn(bk, today) ? "occupied" : ""}">
+                ${emojiForName(bk.name, people)} ${esc(bk.name)} · ${fmtShort(bk.startDate)}–${fmtShort(bk.endDate)}
+                <button class="chip-x" data-free="${bk.id}" title="Remove booking">✕</button>
+              </span>`).join("")}
+          </div>` : ""}
+          ${ooc ? "" : `
+          <form class="booking-form" data-bookform="${bed.id}" hidden>
+            <input data-f="name" placeholder="Who's staying?" value="${esc(me)}" required />
+            <label class="hint">From <input data-f="start" type="date" value="${today}" required /></label>
+            <label class="hint">To <input data-f="end" type="date" value="${today}" required /></label>
+            <button class="btn small" type="submit">Confirm</button>
+            <button class="btn small secondary" type="button" data-cancel>Cancel</button>
+          </form>`}`;
         }).join("")}
       </div>`).join("")}`;
 
-  app.querySelectorAll("[data-book]").forEach((btn) => {
-    btn.onclick = async () => {
-      if (!meId) { alert("Could not find your person record."); return; }
-      await store.addBooking({
-        bedId: btn.dataset.book, personId: meId,
-        startDate: today, endDate: "2026-12-31",
-      });
+  app.querySelectorAll("[data-bookbtn]").forEach((btn) => {
+    btn.onclick = () => {
+      const form = app.querySelector(`[data-bookform="${btn.dataset.bookbtn}"]`);
+      form.hidden = !form.hidden;
+      if (!form.hidden) form.querySelector('[data-f="name"]').focus();
+    };
+  });
+  app.querySelectorAll("[data-cancel]").forEach((btn) => {
+    btn.onclick = () => { btn.closest("form").hidden = true; };
+  });
+  app.querySelectorAll("[data-bookform]").forEach((form) => {
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const name = form.querySelector('[data-f="name"]').value.trim();
+      const start = form.querySelector('[data-f="start"]').value;
+      const end = form.querySelector('[data-f="end"]').value;
+      if (!name || !start || !end) return;
+      if (end < start) { alert("The end date can't be before the start date."); return; }
+      await store.addBooking({ bedId: form.dataset.bookform, name, startDate: start, endDate: end });
       renderBeds();
     };
   });
@@ -216,10 +265,15 @@ async function renderBeds() {
 async function renderEvents() {
   const events = await store.getEvents();
   const me = currentUser();
+  const evMark = (dateStr) => {
+    const n = events.filter((e) => e.date === dateStr).length;
+    return n ? `<span class="cal-ev" title="${n} event(s)">${n}</span>` : "";
+  };
 
   app.innerHTML = `
     <h1>📅 Events</h1>
-    <p class="subtitle">Anyone can add an event. You can delete your own, and comment on any.</p>
+    <p class="subtitle">Anyone can add an event. You can edit or delete your own, and comment on any.</p>
+    ${calendarHTML(new Date(), 2, evMark)}
     <div class="card">
       <form class="stack" id="evForm">
         <div class="row">
@@ -231,16 +285,31 @@ async function renderEvents() {
       </form>
     </div>
     <div class="list" style="margin-top:1.25rem">
-      ${events.length ? events.map((ev) => `
+      ${events.length ? events.map((ev) => {
+        const own = ev.createdBy === me;
+        return `
         <div class="card">
           <div class="item-head">
             <strong>${esc(ev.title)}</strong>
             <span class="date">${fmtDate(ev.date)}</span>
             <span class="spacer" style="margin-left:auto"></span>
-            ${ev.createdBy === me ? `<button class="btn small danger" data-del-ev="${ev.id}">Delete</button>` : ""}
+            ${own ? `<button class="btn small secondary" data-edit-ev="${ev.id}">Edit</button>
+                     <button class="btn small danger" data-del-ev="${ev.id}">Delete</button>` : ""}
           </div>
           <div class="byline">by ${esc(ev.createdBy)}</div>
           ${ev.description ? `<p style="margin-top:0.5rem">${esc(ev.description)}</p>` : ""}
+          ${own ? `
+          <form class="stack edit-form" data-editform-ev="${ev.id}" hidden style="margin-top:0.75rem">
+            <div class="row">
+              <div><label>Title</label><input data-f="title" value="${esc(ev.title)}" required /></div>
+              <div><label>Date</label><input data-f="date" type="date" value="${ev.date}" required /></div>
+            </div>
+            <div><label>Description</label><textarea data-f="desc">${esc(ev.description || "")}</textarea></div>
+            <div class="row">
+              <button class="btn small" type="submit" style="flex:0 0 auto">Save</button>
+              <button class="btn small secondary" type="button" data-cancel style="flex:0 0 auto">Cancel</button>
+            </div>
+          </form>` : ""}
           <div class="comments">
             ${ev.comments.map((c) => `<div class="comment"><span class="who">${esc(c.author)}:</span> ${esc(c.text)}</div>`).join("")
               || `<div class="empty-note">No comments yet</div>`}
@@ -249,7 +318,8 @@ async function renderEvents() {
               <button class="btn small secondary" type="submit" style="flex:0 0 auto">Comment</button>
             </form>
           </div>
-        </div>`).join("") : `<p class="empty-note">No events yet — add the first one above.</p>`}
+        </div>`;
+      }).join("") : `<p class="empty-note">No events yet — add the first one above.</p>`}
     </div>`;
 
   document.getElementById("evForm").onsubmit = async (e) => {
@@ -262,6 +332,26 @@ async function renderEvents() {
     });
     renderEvents();
   };
+  app.querySelectorAll("[data-edit-ev]").forEach((btn) => {
+    btn.onclick = () => {
+      const form = app.querySelector(`[data-editform-ev="${btn.dataset.editEv}"]`);
+      form.hidden = !form.hidden;
+    };
+  });
+  app.querySelectorAll(".edit-form [data-cancel]").forEach((btn) => {
+    btn.onclick = () => { btn.closest("form").hidden = true; };
+  });
+  app.querySelectorAll("[data-editform-ev]").forEach((form) => {
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      await store.updateEvent(form.dataset.editformEv, {
+        title: form.querySelector('[data-f="title"]').value.trim(),
+        date: form.querySelector('[data-f="date"]').value,
+        description: form.querySelector('[data-f="desc"]').value.trim(),
+      });
+      renderEvents();
+    };
+  });
   app.querySelectorAll("[data-del-ev]").forEach((btn) => {
     btn.onclick = async () => { await store.removeEvent(btn.dataset.delEv); renderEvents(); };
   });
@@ -283,7 +373,7 @@ async function renderMeals() {
 
   app.innerHTML = `
     <h1>🍲 Meals</h1>
-    <p class="subtitle">Plan shared meals. Add what you're bringing, and mark if you're coming.</p>
+    <p class="subtitle">Plan shared meals. Add what you're bringing (edit or remove your own), and mark if you're coming.</p>
     <div class="card">
       <form class="stack" id="mlForm">
         <div class="row">
@@ -305,9 +395,21 @@ async function renderMeals() {
             ${ml.createdBy === me ? `<button class="btn small danger" data-del-ml="${ml.id}">Delete</button>` : ""}
           </div>
           <div class="byline">by ${esc(ml.createdBy)}</div>
-          <div class="chips">
-            ${ml.items.map((it) => `<span class="chip">${esc(it.food)} · ${esc(it.broughtBy)}</span>`).join("")
-              || `<span class="empty-note">Nothing on the menu yet</span>`}
+          <div class="meal-items">
+            ${ml.items.length ? ml.items.map((it) => {
+              const own = it.broughtBy === me;
+              return `
+              <div class="meal-item">
+                <span class="chip">${esc(it.food)} · ${esc(it.broughtBy)}</span>
+                ${own ? `<button class="chip-x" data-edit-item="${ml.id}|${it.id}" title="Edit">✏️</button>
+                         <button class="chip-x" data-del-item="${ml.id}|${it.id}" title="Remove">✕</button>` : ""}
+                ${own ? `
+                <form class="inline-edit" data-edititem="${ml.id}|${it.id}" hidden>
+                  <input value="${esc(it.food)}" required />
+                  <button class="btn small" type="submit">Save</button>
+                </form>` : ""}
+              </div>`;
+            }).join("") : `<span class="empty-note">Nothing on the menu yet</span>`}
           </div>
           <form class="row" data-additem="${ml.id}">
             <input placeholder="Food you're bringing…" required />
@@ -322,6 +424,8 @@ async function renderMeals() {
         </div>`;
       }).join("") : `<p class="empty-note">No meals planned yet — add one above.</p>`}
     </div>`;
+
+  const split = (v) => v.split("|");
 
   document.getElementById("mlForm").onsubmit = async (e) => {
     e.preventDefault();
@@ -343,6 +447,28 @@ async function renderMeals() {
       renderMeals();
     };
   });
+  app.querySelectorAll("[data-edit-item]").forEach((btn) => {
+    btn.onclick = () => {
+      const form = app.querySelector(`[data-edititem="${btn.dataset.editItem}"]`);
+      form.hidden = !form.hidden;
+      if (!form.hidden) form.querySelector("input").focus();
+    };
+  });
+  app.querySelectorAll("[data-del-item]").forEach((btn) => {
+    btn.onclick = async () => {
+      const [mealId, itemId] = split(btn.dataset.delItem);
+      await store.removeMealItem(mealId, itemId);
+      renderMeals();
+    };
+  });
+  app.querySelectorAll("[data-edititem]").forEach((form) => {
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const [mealId, itemId] = split(form.dataset.edititem);
+      await store.updateMealItem(mealId, itemId, { food: form.querySelector("input").value.trim() });
+      renderMeals();
+    };
+  });
   app.querySelectorAll("[data-attend]").forEach((btn) => {
     btn.onclick = async () => { await store.toggleAttendance(btn.dataset.attend, me); renderMeals(); };
   });
@@ -359,7 +485,6 @@ async function router() {
     renderLogin();
     return;
   }
-  // close mobile nav on navigation
   document.getElementById("nav")?.classList.remove("open");
 
   const view = ROUTES[path];

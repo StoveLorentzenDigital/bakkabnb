@@ -71,7 +71,7 @@ export function buildSeed() {
     {
       id: "bk_margot_seed",
       bedId: "v_s1",
-      personId: "p_margot",
+      name: "Margot",
       startDate: "2026-06-01",
       endDate: "2026-12-31",
     },
