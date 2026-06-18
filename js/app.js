@@ -17,6 +17,32 @@ const ROUTES = {
   "/meals": renderMeals,
 };
 
+// Photography (web-optimized in assets/img/). Presentation only — kept out of
+// the data store. Assignments are loose for now.
+const HERO_PHOTO = "assets/img/20250703_182740.jpg";
+const LOGIN_PHOTO = "assets/img/20250815_165345.jpg";
+const BUILDING_PHOTOS = {
+  b_van: "assets/img/20250705_161944.jpg",
+  b_lave: "assets/img/20240929_113440.jpg",
+  b_nord: "assets/img/20250815_185404.jpg",
+  b_sond: "assets/img/20250815_165345.jpg",
+};
+const PAGE_HERO = {
+  beds: "assets/img/20250815_185404.jpg",
+  events: "assets/img/20250703_182740.jpg",
+  meals: "assets/img/20250814_194101.jpg",
+};
+
+function pageHero(photo, title, sub) {
+  return `
+    <section class="page-hero" style="background-image:url('${photo}')">
+      <div class="page-hero-inner">
+        <h1>${title}</h1>
+        ${sub ? `<p>${sub}</p>` : ""}
+      </div>
+    </section>`;
+}
+
 // ---- helpers --------------------------------------------------------------
 
 function esc(s = "") {
@@ -89,7 +115,7 @@ function renderLogin() {
   function paint() {
     const isReg = mode === "register";
     app.innerHTML = `
-      <div class="center-wrap">
+      <div class="center-wrap" style="background-image:url('${LOGIN_PHOTO}')">
         <div class="card login-card">
           <h1>🏡 Bakkabnb</h1>
           <p class="subtitle">Family coordination at the Kleppe farm.</p>
@@ -149,23 +175,37 @@ async function renderHome() {
   };
 
   app.innerHTML = `
-    <h1>Who's at the farm</h1>
-    <p class="subtitle">Today, ${fmtDate(today)} · tap <a href="#/beds">Beds</a> to book or free a bed.</p>
-    <div class="buildings">
-      ${buildings.map((b) => {
-        const occ = occupantsOf(b);
-        const sleepable = b.beds.filter((bed) => bed.status !== "out_of_commission").length;
-        return `
-        <div class="card building">
-          <h3>${b.emoji} ${esc(b.name)} <span class="count">· ${sleepable} beds</span></h3>
-          <div class="bubbles">
-            ${occ.length
-              ? occ.map((n) => `<span class="bubble"><span class="av">${emojiForName(n, people)}</span>${esc(n)}</span>`).join("")
-              : `<span class="empty-note">Empty right now</span>`}
-          </div>
-        </div>`;
-      }).join("")}
-    </div>`;
+    <section class="hero" style="background-image:url('${HERO_PHOTO}')">
+      <div class="hero-inner">
+        <p class="eyebrow">Kleppe farm</p>
+        <h2 class="hero-title">Who's at the farm</h2>
+        <p class="hero-sub">${fmtDate(today)} · tap <a href="#/beds" style="color:#fff">Beds</a> to book or free a bed.</p>
+      </div>
+    </section>
+    <section class="section">
+      <p class="eyebrow">The buildings</p>
+      <div class="buildings">
+        ${buildings.map((b) => {
+          const occ = occupantsOf(b);
+          const sleepable = b.beds.filter((bed) => bed.status !== "out_of_commission").length;
+          const photo = BUILDING_PHOTOS[b.id];
+          return `
+          <article class="card building">
+            <div class="building-photo" style="background-image:url('${photo}')">
+              <span class="building-badge">${b.emoji} ${esc(b.name)}</span>
+            </div>
+            <div class="building-body">
+              <p class="count">${sleepable} beds</p>
+              <div class="bubbles">
+                ${occ.length
+                  ? occ.map((n) => `<span class="bubble"><span class="av">${emojiForName(n, people)}</span>${esc(n)}</span>`).join("")
+                  : `<span class="empty-note">Empty right now</span>`}
+              </div>
+            </div>
+          </article>`;
+        }).join("")}
+      </div>
+    </section>`;
 }
 
 // ---- beds ------------------------------------------------------------------
@@ -194,8 +234,8 @@ async function renderBeds() {
   };
 
   app.innerHTML = `
-    <h1>🛏️ Beds</h1>
-    <p class="subtitle">Book future stays and see who's where. Next two months:</p>
+    ${pageHero(PAGE_HERO.beds, "🛏️ Beds", "Book future stays and see who's where.")}
+    <p class="eyebrow">Next two months</p>
     ${calendarHTML(new Date(), 2, bedsMark)}
     ${buildings.map((b) => `
       <h2>${b.emoji} ${esc(b.name)}</h2>
@@ -271,8 +311,8 @@ async function renderEvents() {
   };
 
   app.innerHTML = `
-    <h1>📅 Events</h1>
-    <p class="subtitle">Anyone can add an event. You can edit or delete your own, and comment on any.</p>
+    ${pageHero(PAGE_HERO.events, "📅 Events", "Anyone can add an event. Edit or delete your own, and comment on any.")}
+    <p class="eyebrow">Next two months</p>
     ${calendarHTML(new Date(), 2, evMark)}
     <div class="card">
       <form class="stack" id="evForm">
@@ -372,8 +412,7 @@ async function renderMeals() {
   const me = currentUser();
 
   app.innerHTML = `
-    <h1>🍲 Meals</h1>
-    <p class="subtitle">Plan shared meals. Add what you're bringing (edit or remove your own), and mark if you're coming.</p>
+    ${pageHero(PAGE_HERO.meals, "🍲 Meals", "Plan shared meals — add what you're bringing, and mark if you're coming.")}
     <div class="card">
       <form class="stack" id="mlForm">
         <div class="row">
